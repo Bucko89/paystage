@@ -19,6 +19,7 @@
  */
 
 import { evaluatePayment, normalizePaymentRequired } from "@paystage/preflight";
+import { BuilderCodeClientExtension } from "@x402/extensions";
 import { parsePolicy } from "@paystage/policy";
 
 export type Verdict = "pay" | "review" | "do_not_pay";
@@ -32,6 +33,13 @@ export interface GuardOptions {
   onReview?: "pay" | "refuse";
   /** Maximum value in base units, passed to x402-fetch. */
   maxValue?: bigint;
+  /**
+   * Base Builder Code (ERC-8021) for the payments this wrapper causes.
+   *
+   * 1-32 characters, lowercase alphanumeric and underscores. Opt-in: it goes on payments our code
+   * drives, never on ones we merely observe.
+   */
+  builderCode?: string;
   /** Injected for tests; defaults to `x402-fetch`'s wrapFetchWithPayment. */
   wrap?: (
     fetchImpl: typeof fetch,
@@ -77,6 +85,25 @@ export function guardFetch(fetchImpl: typeof fetch, options: GuardOptions) {
       );
     }
   })();
+
+  // Base Builder Code (ERC-8021): an opt-in that travels on the payments this wrapper causes.
+  //
+  // We never sign, so a builder code cannot attribute a user's volume to us — but it CAN attribute the
+  // payments our code drives, which is exactly what the program is for. It is never attached to a
+  // payment we merely observed.
+  if (options.builderCode !== undefined) {
+    if (!/^[a-z0-9_]{1,32}$/.test(options.builderCode)) {
+      throw new Error(
+        `@paystage/x402-guard: invalid builderCode "${options.builderCode}" — must be 1-32 chars, lowercase alphanumeric and underscores`,
+      );
+    }
+    // Registered synchronously: a registration that may not have happened by the time the first
+    // payment is built is worse than a hard dependency.
+    const client = options.walletClient as { registerExtension?: (ext: unknown) => unknown } | undefined;
+    if (client && typeof client.registerExtension === "function") {
+      client.registerExtension(new BuilderCodeClientExtension(options.builderCode));
+    }
+  }
 
   const onReview = options.onReview ?? "pay";
   const lastResult: { current: GuardResult | null } = { current: null };

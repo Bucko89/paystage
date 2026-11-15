@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { evaluateVerification, paystageVerifierHook } from "../src/verifier-hook.js";
+import { guardFetch } from "../src/index.js";
 
 // A policy tight enough to refuse the second payment on size alone, so the decision is unambiguous.
 const USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
@@ -62,5 +63,19 @@ describe("x402 verifier hook", () => {
     const ext = paystageVerifierHook({ policy });
     expect(ext.key).toBe("paystage-verifier");
     expect(typeof ext.hooks.beforeVerify).toBe("function");
+  });
+});
+
+describe("builder code", () => {
+  it("refuses a malformed code rather than sending it", () => {
+    expect(() => guardFetch(fetch, { policy, builderCode: "PayStage!" })).toThrow(/invalid builderCode/);
+  });
+
+  it("registers the code on the x402 client it would pay with", () => {
+    const registered: unknown[] = [];
+    const client = { registerExtension: (ext: unknown) => registered.push(ext) };
+    guardFetch(fetch, { policy: { ...policy }, builderCode: "paystage", walletClient: client });
+    expect(registered).toHaveLength(1);
+    expect(JSON.stringify(registered[0])).toContain("paystage");
   });
 });
